@@ -1,0 +1,15 @@
+# /etc/default file for RRD cache daemon
+
+# Override by free-pmx: NO SHRED service
+# This is a READ-ONLY BIND mount drop-in for: /etc/default/rrdcached
+# See: man no-shred
+
+DAEMON=/usr/bin/rrdcached
+BASE_PATH=/var/lib/rrdcached/db/
+PIDFILE=/var/run/rrdcached.pid
+SOCKFILE=/var/run/rrdcached.sock
+
+JOURNAL_PATH=
+BASE_OPTIONS="-B -f 2h"
+
+WRITE_TIMEOUT=1h

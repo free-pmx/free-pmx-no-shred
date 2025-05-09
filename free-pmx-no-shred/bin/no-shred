@@ -1,0 +1,152 @@
+#!/bin/bash
+
+# SPDX-License-Identifier: AGPL-3.0-only
+
+declare -r NO_SHRED_COMMON="/usr/lib/free-pmx/no-shred-common"
+
+source "$NO_SHRED_COMMON" \
+|| { echo "Internal error, aborting." >&2; exit 255; }
+
+print_info() {
+    declare -i status=0
+
+    declare -r stat_cdb_file="stat -c '$STAT_REC_FORMAT' '$CDB_DIR/$CDB_FNAME' 2> /dev/null ||:"
+    declare -r stat_cdb_wal_file="stat -c '$STAT_REC_FORMAT' '$CDB_DIR/${CDB_FNAME}-wal' 2> /dev/null ||:"
+    declare -r query_cdb_root="$NO_SHRED_COMMON cdb_query '$CDB_REC_QUERY' 2> /dev/null"
+
+    systemctl -q is-active no-shred.service \
+    || { echo "NO-SHRED service NOT active." >&2; status=$((status|1)); }
+
+    echo; echo "* Cluster filesystem backend database [pmxcfs]"
+
+    declare qrec qrec_umns
+
+    echo; echo "Live:"
+
+    printf_stat_rec "$CDB_FNAME" "$(eval "$stat_cdb_file")" || status=$((status|2))
+    printf_stat_rec "$CDB_FNAME-wal" "$(eval "$stat_cdb_wal_file")" || status=$((status|2))
+    qrec=$(eval "$query_cdb_root") && printf_cdb_rec "$qrec" || status=$((status|4))
+    
+    echo; echo "Underlying:"
+
+    mountpoint -q "$CDB_DIR" \
+    || { echo "Directory '$CDB_DIR' NOT mounted over." >&2; status=$((status|8)); }
+
+    printf_stat_rec "$CDB_FNAME" "$(umns_run "$CDB_DIR" "$stat_cdb_file")" || status=$((status|2))
+    qrec_umns=$(umns_run "$CDB_DIR" "$query_cdb_root") && printf_cdb_rec "$qrec_umns" || status=$((status|4))
+    printf_cdb_rec_diff "$qrec" "$qrec_umns" || status=$((status|16))
+
+    echo; echo "Flush timer:"
+
+    systemctl -q is-active no-shred-flush.timer \
+    || { echo "NO-SHRED flushing service timer NOT active." >&2; status=$((status|1)); }
+
+    systemctl -ql list-timers no-shred-flush.timer --no-pager \
+    || status=$((status|1))
+
+    echo; echo "* Time series data caching [rrdcached]"
+
+    mountpoint -q "$RRDC_DEFAULT" \
+    || { echo "Configuration file '$RRDC_DEFAULT' NOT overriden." >&2; status=$((status|1)); }
+
+    echo; echo "Process:"
+    ps hw -C rrdcached -o command 2> /dev/null \
+    || { echo "Not found." >&2; status=$((status|1)); }
+
+    echo; echo "Stats:"
+    rrdc_stats 2> /dev/null \
+    || { echo "Unable to retrieve." >&2; status=$((status|1)); }
+
+    echo
+
+    return $status
+}
+
+print_log() {
+    journalctl --no-pager -q -b \
+        -u no-shred.service \
+        -u no-shred-flush.service \
+    || return 1
+}
+
+rrdc_override() {
+    systemctl -q is-active rrdcached.service && return 1
+    mountpoint -q "$RRDC_DEFAULT" && return 2
+
+    mount -o bind,ro "$RRDC_OVERRIDE" "$RRDC_DEFAULT" || return 4
+}
+
+cdb_mount() {
+    mountpoint -q "$CDB_DIR" && return 1
+
+    declare trdir
+    trdir=$(mktemp -d -p "$TMP_DIR" "${TMP_PREFIX}_ramfs-XXXXXX" 2> /dev/null) || return 2
+
+    mount ramfs -t ramfs "$trdir" || return 4
+    cdb_vac_into "$trdir/$CDB_FNAME" || return 8
+
+    mount --bind "$trdir" "$CDB_DIR" || return 16
+    umount "$trdir" || return 32
+    rmdir "$trdir" || return 32
+}
+
+cdb_flush() {
+    mountpoint -q "$CDB_DIR" || return 1
+
+    declare tfname
+    tfname=$(mktemp "${TMP_PREFIX}_${CDB_FNAME}-XXXXXX" 2> /dev/null) || return 2
+
+    declare uflush; read -d '' -r uflush << EOF
+ln -f '$CDB_DIR/$CDB_FNAME' '$CDB_DIR/backup/$CDB_FNAME.bak'; \
+mv '$TMP_DIR/$tfname' '$CDB_DIR/' \
+&& mv '$CDB_DIR/$tfname' '$CDB_DIR/$CDB_FNAME' \
+&& sync '$CDB_DIR/$CDB_FNAME' \
+&& rm -f '$CDB_DIR/$CDB_FNAME'{-wal,-shm}
+EOF
+    declare -r uflush
+
+    cdb_vac_into "$TMP_DIR/$tfname" || return 4
+    umns_run "$CDB_DIR" "{ $uflush; } 2> /dev/null" || return 8
+}
+
+(( $# <= 1 )) || { echo "Too many arguments." >&2; exit 1; }
+
+declare arg="${1:-info}"
+
+case $arg in
+
+    "info")
+        echo "free-pmx: NO-SHRED - Information summary"
+        print_info || err_exit $?    
+    ;;
+
+    "log")
+        echo "free-pmx: NO-SHRED - Log"
+        print_log || err_exit $?
+    ;;
+
+    "start")
+        echo "Setting up flushing service timer ..."
+        systemd-run -q --unit="no-shred-flush.service"\
+            --on-active="${CDB_FLUSH_FIRST}min"\
+            --on-unit-active="${CDB_FLUSH_AGAIN}min"\
+        || err_exit $?
+
+        echo "Creating ramfs for cluster filesystem backend database ..."
+        cdb_mount 2> /dev/null || err_exit $?
+
+        echo "Overriding rrdcached configuration ..."
+        rrdc_override 2> /dev/null || err_exit $?
+    ;;
+
+    "flush")
+        echo "Flushing cluster filesystem backend database from ramfs ..."
+        cdb_flush 2> /dev/null || err_exit $?
+    ;;
+
+    *)
+        echo "Invalid argument." >&2
+        exit 1
+    ;;
+        
+esac

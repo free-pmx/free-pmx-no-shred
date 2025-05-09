@@ -1,0 +1,13 @@
+Package: free-pmx-no-shred
+Version: 0.1.0~20250509+TEST
+Section: utils
+Priority: optional
+Architecture: all
+Maintainer: free-pmx <179050296+free-pmx@users.noreply.github.com>
+Description: No-shred caching tool for Proxmox VE
+ Avoids excessive block layer writes, increases resiliency.
+ Mounts cluster filesystem backend database location into RAM,
+ avoiding implementation bugs and decreasing risk of data corruption.
+ Overrides rrdcached configuration defaults to optimise time-series
+ database write frequency.
+Homepage: https://free-pmx.pages.dev

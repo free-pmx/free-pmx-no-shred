@@ -1,0 +1,17 @@
+[Unit]
+Description=free-pmx: NO SHRED service
+Before=pve-cluster.service
+Before=rrdcached.service
+RefuseManualStart=true
+RefuseManualStop=true
+
+[Service]
+Type=oneshot
+ExecStart=no-shred start
+TimeoutStartSec=15
+RemainAfterExit=yes
+ExecStop=no-shred flush
+TimeoutStopSec=15
+
+[Install]
+WantedBy=multi-user.target

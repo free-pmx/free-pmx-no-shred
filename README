@@ -1,0 +1,11 @@
+Build yourself:
+
+    git clone https://github.com/free-pmx/free-pmx-no-shred
+    dpkg-deb --build --root-owner-group free-pmx-no-shred/free-pmx-no-shred
+
+See also:
+
+- Download and install <https://free-pmx.pages.dev/tools/free-pmx-no-shred/>
+- Why Proxmox VE shreds your SSDs <https://free-pmx.pages.dev/insights/pve-ssds/>
+- How Proxmox VE shreds your SSDs <https://free-pmx.pages.dev/insights/pmxcfs-writes/>
+- The pmxcfs mountpoint of /etc/pve <https://free-pmx.pages.dev/insights/pmxcfs-mount/>

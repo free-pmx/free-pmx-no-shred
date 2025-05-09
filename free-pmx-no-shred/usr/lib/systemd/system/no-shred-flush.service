@@ -1,0 +1,6 @@
+[Unit]
+Description=free-pmx: NO SHRED flushing service
+After=no-shred.service
+
+[Service]
+ExecStart=no-shred flush

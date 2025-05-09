@@ -1,0 +1,17 @@
+#!/bin/bash
+set -e
+
+case "$1" in
+    remove|deconfigure)
+        deb-systemd-invoke stop no-shred-flush.timer ||:
+        deb-systemd-invoke disable no-shred.service ||:
+    ;;
+
+    upgrade|failed-upgrade)
+    ;;
+
+    *) 
+        echo "ERROR: $0 - unknown argument: $1" >&2
+        exit 1
+    ;;
+esac

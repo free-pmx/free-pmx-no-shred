@@ -1,0 +1,95 @@
+#!/bin/bash
+
+# SPDX-License-Identifier: AGPL-3.0-only
+
+declare -r TMP_DIR="/tmp"
+declare -r TMP_PREFIX="free-pmx-no-shred"
+declare -r CDB_DIR="/var/lib/pve-cluster"
+declare -r CDB_FNAME="config.db"
+
+declare -r RRDC_DEFAULT="/etc/default/rrdcached"
+declare -r RRDC_OVERRIDE="/usr/share/free-pmx/rrdcached"
+declare -r RRDC_SOCK="/var/run/rrdcached.sock"
+
+declare -r STAT_REC_FORMAT="%Y|%s"
+declare -r CDB_REC_QUERY="SELECT mtime,version,writer FROM tree WHERE inode=0;"
+
+declare -r CDB_FLUSH_FIRST=5
+declare -r CDB_FLUSH_AGAIN=60
+
+umns_run() {
+    [[ -n $1 ]] && declare mpoint=$1 || return 1
+    [[ -n $2 ]] && declare command=$2 || return 1
+
+    declare umount_mpoint
+    umount_mpoint="{ cd '$TMP_DIR' && umount '$mpoint'; } 2> /dev/null"
+
+    unshare -m bash -c "$umount_mpoint || exit 255; $command"
+}
+
+printf_etstamp() {
+    [[ -n $1 ]] && declare -r etstamp=$1 || return 1
+
+    date -d @"$etstamp" +"%a %F %H:%M:%S %Z"
+}
+
+printf_stat_rec() {
+    [[ -n $1 ]] && declare -r fname=$1 || return 1
+    [[ -n $2 ]] && declare -r stat_r=${2} || return 1
+
+    declare etstamp bsize
+    IFS='|' read -r etstamp bsize <<< "$stat_r"
+    echo "$(printf_etstamp "$etstamp") lastmod '$fname' - Size: $bsize B"
+}
+
+printf_cdb_rec() {
+    [[ -n $1 ]] && declare -r cdb_root_row=$1 || return 1
+
+    declare etstamp version node
+    IFS='|' read -r etstamp version node <<< "$cdb_root_row"
+    echo "$(printf_etstamp "$etstamp") last record - Version: $version - Node: $node"
+}
+
+printf_cdb_rec_diff() {
+    [[ -n $1 ]] && declare -r cdb_root_row1=$1 || return 1
+    [[ -n $2 ]] && declare -r cdb_root_row2=$2 || return 1
+
+    declare -i etstamp1 version1 etstamp2 version2
+    IFS='|' read -r etstamp1 version1 <<< "$cdb_root_row1"
+    IFS='|' read -r etstamp2 version2 <<< "$cdb_root_row2"
+
+    mins=$(( (etstamp1 - etstamp2) / 60 ))
+    vers=$(( version1 - version2 ))
+
+    echo "${mins}min behind: $vers versions"
+}
+
+cdb_vac_into() {
+    [[ -n $1 ]] && declare -r fpath=$1 || return 1
+    
+    cdb_query "VACUUM main INTO '$fpath';"
+}
+
+cdb_query() {
+    [[ -n $1 ]] && declare -r query=$1 || return 1
+
+    printf '%s\n' \
+        ".open --readonly '$CDB_DIR/$CDB_FNAME'" \
+        "$query" \
+    | sqlite3
+    
+    return $(( PIPESTATUS[0] | PIPESTATUS[1] ))
+}
+
+rrdc_stats() {
+    socat - UNIX-CONNECT:"$RRDC_SOCK" <<< "STATS" | awk 'NR > 1 {print}'
+    return $(( PIPESTATUS[0] | PIPESTATUS[1] ))    
+}
+
+err_exit() { echo "ISSUES reported: $1" >&2; exit 1; }
+
+
+if [[ ${BASH_SOURCE[0]} -ef $0 ]]; then
+    [[ -n $1 ]] && func="$1" || exit 1
+    shift; "$func" "$@"
+fi

@@ -93,19 +93,19 @@ cdb_mount() {
 cdb_flush() {
     mountpoint -q "$CDB_DIR" || return 1
 
-    declare tfname
-    tfname=$(mktemp "${TMP_PREFIX}_${CDB_FNAME}-XXXXXX" 2> /dev/null) || return 2
+    declare tfile
+    tfile=$(mktemp -p "$TMP_DIR" "${TMP_PREFIX}_${CDB_FNAME}-XXXXXX" 2> /dev/null) || return 2
 
     declare uflush; read -d '' -r uflush << EOF
 ln -f '$CDB_DIR/$CDB_FNAME' '$CDB_DIR/backup/$CDB_FNAME.bak'; \
-mv '$TMP_DIR/$tfname' '$CDB_DIR/' \
-&& mv '$CDB_DIR/$tfname' '$CDB_DIR/$CDB_FNAME' \
+mv '$tfile' '$CDB_DIR/' \
+&& mv '$CDB_DIR/${tfile##*/}' '$CDB_DIR/$CDB_FNAME' \
 && sync '$CDB_DIR/$CDB_FNAME' \
 && rm -f '$CDB_DIR/$CDB_FNAME'{-wal,-shm}
 EOF
     declare -r uflush
 
-    cdb_vac_into "$TMP_DIR/$tfname" || return 4
+    cdb_vac_into "$tfile" || return 4
     umns_run "$CDB_DIR" "{ $uflush; } 2> /dev/null" || return 8
 }
 
